@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LEV Data System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
+    .card { border: none; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 25px; border-radius: 8px;}
+    .section-title { background: #0b5ed7; color: white; padding: 12px 20px; border-radius: 8px 8px 0 0; font-weight: bold; }
+    
+    /* Responsive Grid */
+    .grid-10 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .data-point input { text-align: center; font-weight: bold; font-size: 0.95rem; padding: 10px 5px;}
+    .data-point input::placeholder { color: #ccc; font-weight: normal; font-size: 0.8rem;}
+    
+    @media (max-width: 600px) {
+      .grid-10 { gap: 5px; }
+      .data-point input { padding: 8px 2px; font-size: 0.85rem; }
+    }
+    
+    .calc-box { background: #eef2f7; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #d1d9e6; }
+    .calc-val { font-size: 1.3rem; font-weight: 800; color: #0b5ed7; }
+    .hidden { display: none !important; }
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 9999; display: flex; justify-content: center; align-items: center; flex-direction: column; }
+  </style>
+</head>
+<body>
+
+<datalist id="list-ductTypes"></datalist> <datalist id="list-ductMats"></datalist>
+<datalist id="list-fanModels"></datalist> <datalist id="list-fanTypes"></datalist>
+<datalist id="list-motModels"></datalist>
+
+<div id="loading" class="loading-overlay hidden">
+  <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+  <h4 class="mt-3 text-primary fw-bold" id="loadingText">Processing...</h4>
+</div>
+
+<div class="container py-4" style="max-width: 900px;">
+  
+  <div id="loginSection" class="card p-5 text-center shadow">
+    <h3 class="mb-4">LEV Data System</h3>
+    <input type="password" id="passkey" class="form-control w-75 w-md-50 mx-auto text-center" placeholder="Pass Key">
+    <button class="btn btn-primary mt-3 w-50 mx-auto fw-bold d-block" onclick="doLogin()">Enter Setup</button>
+  </div>
+
+  <form id="mainForm" class="hidden" onsubmit="submitForm(event)">
+    <div class="card">
+      <div class="section-title">1. Location & Setup</div>
+      <div class="card-body row g-3">
+        <div class="col-md-6"><label class="small text-muted fw-bold">Technician</label><select class="form-select" name="technician" id="techSelect" onchange="autoFillTeam()" required></select></div>
+        <div class="col-md-6"><label class="small text-muted fw-bold">Team</label><input type="text" class="form-control bg-light" name="team" id="teamInput" readonly></div>
+        <div class="col-md-4"><label class="small text-muted fw-bold">Faculty</label><select class="form-select" id="facSelect" onchange="filterLocations(event)" required></select></div>
+        <div class="col-md-4"><label class="small text-muted fw-bold">Block</label><select class="form-select" id="blockSelect" name="block" onchange="filterLocations(event)" required></select></div>
+        <div class="col-md-4"><label class="small text-muted fw-bold">LEV ID</label><select class="form-select" id="levSelect" name="levId" required></select></div>
+        <div class="col-6"><label class="small text-muted fw-bold">Hood Height (in)</label><input type="number" step="0.001" class="form-control" name="hoodHeight" id="hHeight" oninput="updateCalcs()" required></div>
+        <div class="col-6"><label class="small text-muted fw-bold">Hood Length (in)</label><input type="number" step="0.001" class="form-control" name="hoodLength" id="hLength" oninput="updateCalcs()" required></div>
+      </div>
+    </div>
+
+    <div class="card"><div class="section-title">2. Face Velocity (Full Open - 20 Pts)</div>
+      <div class="card-body">
+        <div class="grid-10 mb-3" id="gridFull"></div>
+        <div class="row g-2">
+          <div class="col-6"><div class="calc-box">Avg Velocity (fpm) <div id="dispAvgFull" class="calc-val">0.00</div></div></div>
+          <div class="col-6"><div class="calc-box">Flow Rate (cfm) <div id="dispFlowFull" class="calc-val">0</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card"><div class="section-title">3. Face Velocity (18" Open - 15 Pts)</div>
+      <div class="card-body">
+        <div class="grid-10 mb-3" id="grid18"></div>
+        <div class="row g-2">
+          <div class="col-6"><div class="calc-box">Avg Velocity (fpm) <div id="dispAvg18" class="calc-val">0.00</div></div></div>
+          <div class="col-6"><div class="calc-box">Flow Rate (cfm) <div id="dispFlow18" class="calc-val">0</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6">
+        <div class="card border-primary">
+          <div class="section-title bg-secondary">4. Ducting (BEFORE Fan)</div>
+          <div class="card-body">
+            <div class="row g-2 mb-3">
+              <div class="col-6"><label class="small">Duct Type</label><input list="list-ductTypes" class="form-control form-control-sm" name="ductType_before"></div>
+              <div class="col-6"><label class="small">Material</label><input list="list-ductMats" class="form-control form-control-sm" name="ductMat_before"></div>
+              <div class="col-6"><label class="small">Dimension</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductDim_before"></div>
+              <div class="col-6"><label class="small">Thickness</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductThick_before"></div>
+              <div class="col-6"><label class="small">Area (ft²)</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductArea_before"></div>
+              <div class="col-6"><label class="small">Air Temp</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductTemp_before"></div>
+            </div>
+            <label class="fw-bold small text-primary mb-1">Traverse VP (10 Pts)</label>
+            <div class="grid-10 mb-3" id="gridVpBefore"></div>
+            <label class="fw-bold small text-danger">Static Pressure (SP)</label><input type="number" step="0.001" class="form-control" name="sp_before" required>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card border-primary">
+          <div class="section-title bg-secondary">5. Ducting (AFTER Fan)</div>
+          <div class="card-body">
+             <div class="row g-2 mb-3">
+              <div class="col-6"><label class="small">Duct Type</label><input list="list-ductTypes" class="form-control form-control-sm" name="ductType_after"></div>
+              <div class="col-6"><label class="small">Material</label><input list="list-ductMats" class="form-control form-control-sm" name="ductMat_after"></div>
+              <div class="col-6"><label class="small">Dimension</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductDim_after"></div>
+              <div class="col-6"><label class="small">Thickness</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductThick_after"></div>
+              <div class="col-6"><label class="small">Area (ft²)</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductArea_after"></div>
+              <div class="col-6"><label class="small">Air Temp</label><input type="number" step="0.001" class="form-control form-control-sm" name="ductTemp_after"></div>
+            </div>
+            <label class="fw-bold small text-primary mb-1">Traverse VP (10 Pts)</label>
+            <div class="grid-10 mb-3" id="gridVpAfter"></div>
+            <label class="fw-bold small text-danger">Static Pressure (SP)</label><input type="number" step="0.001" class="form-control" name="sp_after" required>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6">
+         <div class="card"><div class="section-title bg-dark">6. Fan Data</div>
+          <div class="card-body row g-2">
+            <div class="col-6"><label class="small fw-bold">Model</label><input list="list-fanModels" class="form-control" name="fanModel"></div>
+            <div class="col-6"><label class="small fw-bold">Type</label><input list="list-fanTypes" class="form-control" name="fanType"></div>
+            <div class="col-12"><label class="small fw-bold">Capacity</label><input type="text" class="form-control" name="fanCap"></div>
+            <div class="col-6"><label class="small fw-bold text-danger">TP</label><input type="number" step="0.001" class="form-control" name="fanTp"></div>
+            <div class="col-6"><label class="small fw-bold text-danger">SP</label><input type="number" step="0.001" class="form-control" name="fanSp"></div>
+            
+            <div class="col-12 mt-3"><label class="small fw-bold text-success">Fan RPM Inputs</label></div>
+            <div class="col-4"><input type="number" class="form-control text-center" name="fanRpm_1" placeholder="Pt 1"></div>
+            <div class="col-4"><input type="number" class="form-control text-center" name="fanRpm_2" placeholder="Pt 2"></div>
+            <div class="col-4"><input type="number" class="form-control text-center" name="fanRpm_3" placeholder="Pt 3"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+         <div class="card"><div class="section-title bg-dark">7. Motor Data</div>
+          <div class="card-body row g-2">
+            <div class="col-12"><label class="small fw-bold">Model</label><input list="list-motModels" class="form-control" name="motModel"></div>
+            <div class="col-6"><label class="small fw-bold">Capacity</label><input type="text" class="form-control" name="motCap"></div>
+            <div class="col-6"><label class="small fw-bold">Power</label><input type="text" class="form-control" name="motPow"></div>
+            <div class="col-4"><label class="small fw-bold text-danger">TP</label><input type="number" step="0.001" class="form-control" name="motTp"></div>
+            <div class="col-4"><label class="small fw-bold text-danger">SP</label><input type="number" step="0.001" class="form-control" name="motSp"></div>
+            <div class="col-4"><label class="small fw-bold text-success">RPM</label><input type="number" step="0.001" class="form-control" name="motRpm"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="submitError" class="alert alert-danger hidden"></div>
+    <button type="submit" id="submitBtn" class="btn btn-success w-100 btn-lg mb-5 shadow fw-bold">Compile & Submit Report</button>
+  </form>
+
+  <div id="successMsg" class="hidden card p-5 text-center bg-success text-white shadow">
+    <h2>Data Generated Successfully!</h2>
+    <p>Data stored and templates mapped accurately.</p>
+    <a id="repLink" href="#" target="_blank" class="btn btn-light mt-3 fw-bold text-success">View Live Report File</a>
+    <button onclick="location.reload()" class="btn btn-outline-light mt-3 ms-2">Submit Next Hood</button>
+  </div>
+</div>
+
+<script>
+  // ==========================================
+  // CONFIGURATION: PASTE YOUR GAS WEB APP URL HERE
+  // ==========================================
+  const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby8jXsyLkob_yYt2-1goSETdWs6-Dwr_ns2BVBTN4wtHvDaMBiRIxIG33YKfLKG1x-u/exec"; 
+
+  let DB = { techs: [], locs: [] };
+
+  function initGrids() {
+    const make = (id, pref, max) => {
+      let h=''; 
+      for(let i=1;i<=max;i++){
+        h+=`<div class="data-point"><input type="number" step="0.001" class="form-control" name="${pref}_${i}" placeholder="Pt ${i}" oninput="updateCalcs()"></div>`;
+      }
+      document.getElementById(id).innerHTML = h;
+    };
+    make('gridFull', 'faceFull', 20); make('grid18', 'face18', 15);
+    make('gridVpBefore', 'vp_before', 10); make('gridVpAfter', 'vp_after', 10);
+  }
+
+  function toggleLoading(show, msg="Processing...") {
+    const el = document.getElementById('loading');
+    document.getElementById('loadingText').innerText = msg;
+    if(show) el.classList.remove('hidden'); else el.classList.add('hidden');
+  }
+
+  function doLogin() {
+    const pk = document.getElementById('passkey').value;
+    toggleLoading(true, "Verifying...");
+    
+    // Call the API (POST)
+    fetch(SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "login", passkey: pk })
+    })
+    .then(res => res.json())
+    .then(data => {
+      toggleLoading(false);
+      if(data.success) {
+        document.getElementById('loginSection').className = 'hidden';
+        document.getElementById('mainForm').classList.remove('hidden');
+        initGrids(); 
+        loadData();
+      } else {
+        alert("Invalid Passkey");
+      }
+    })
+    .catch(err => {
+      toggleLoading(false);
+      alert("Connection Failed: " + err);
+    });
+  }
+
+  function loadData() {
+    // Call the API (GET)
+    fetch(SCRIPT_URL + "?action=getDropdowns")
+      .then(res => res.json())
+      .then(d => {
+        DB.techs = d.techs; DB.locs = d.locations;
+        const sel = (id, arr) => { let el = document.getElementById(id); el.innerHTML='<option value="">Select...</option>'; arr.forEach(a => el.add(new Option(a,a))); }
+        sel('techSelect', d.techs.map(t => t.name));
+        sel('facSelect', [...new Set(d.locations.map(l => l.faculty))]);
+        
+        const dl = (id, arr) => { let el = document.getElementById(id); arr.forEach(a => { let o=document.createElement('option'); o.value=a; el.appendChild(o); }); }
+        dl('list-ductTypes', d.ductTypes); dl('list-ductMats', d.ductMats);
+        dl('list-fanModels', d.fanModels); dl('list-fanTypes', d.fanTypes); dl('list-motModels', d.motModels);
+      });
+  }
+
+  function autoFillTeam() {
+    const t = DB.techs.find(x => x.name === document.getElementById('techSelect').value);
+    document.getElementById('teamInput').value = t ? t.team : '';
+  }
+
+  function filterLocations(e) {
+    const fac = document.getElementById('facSelect').value;
+    const blk = document.getElementById('blockSelect').value;
+    
+    if(e.target.id === 'facSelect') {
+      const blocks = [...new Set(DB.locs.filter(l => l.faculty === fac).map(l => l.block))];
+      let el = document.getElementById('blockSelect'); 
+      el.innerHTML = '<option value="">Select Block...</option>';
+      blocks.forEach(b => el.add(new Option(b, b))); 
+      document.getElementById('levSelect').innerHTML = '<option value="">Select ID...</option>';
+    } 
+    else if (e.target.id === 'blockSelect') {
+      const ids = [...new Set(DB.locs.filter(l => l.faculty === fac && l.block === blk).map(l => l.levId))];
+      let el = document.getElementById('levSelect'); 
+      el.innerHTML = '<option value="">Select ID...</option>';
+      ids.forEach(i => el.add(new Option(i, i)));
+    }
+  }
+
+  function updateCalcs() {
+    const calc = (prefix, max, avgId, flowId, isFull) => {
+      let sum = 0, filled = 0;
+      for(let i=1; i<=max; i++) {
+        let val = parseFloat(document.querySelector(`input[name="${prefix}_${i}"]`).value) || 0;
+        if(val > 0) { sum += val; filled++; }
+      }
+      let avg = filled ? (sum/filled) : 0;
+      document.getElementById(avgId).innerText = avg.toFixed(2);
+
+      let h = parseFloat(document.getElementById('hHeight').value) || 0;
+      let l = parseFloat(document.getElementById('hLength').value) || 0;
+      let area = ((isFull ? h : 18) * l) / 144;
+      document.getElementById(flowId).innerText = (avg * area).toFixed(0);
+    };
+    calc('faceFull', 20, 'dispAvgFull', 'dispFlowFull', true);
+    calc('face18', 15, 'dispAvg18', 'dispFlow18', false);
+  }
+
+  function submitForm(e) {
+    e.preventDefault();
+    toggleLoading(true, "Compiling Report & Saving to Drive...");
+    const errBox = document.getElementById('submitError');
+    errBox.classList.add('hidden');
+    
+    // Convert FormData to JSON Object
+    let fd = {}; 
+    new FormData(e.target).forEach((v,k) => fd[k]=v);
+    
+    fetch(SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "submit", formData: fd })
+    })
+    .then(res => res.json())
+    .then(res => {
+      toggleLoading(false);
+      if(res.success) {
+        document.getElementById('mainForm').className = 'hidden';
+        document.getElementById('successMsg').classList.remove('hidden');
+        document.getElementById('repLink').href = res.url;
+      } else {
+        errBox.innerText = "Generation Error: " + res.error;
+        errBox.classList.remove('hidden');
+      }
+    })
+    .catch(err => {
+      toggleLoading(false);
+      errBox.innerText = "Server Connection Failed. Check internet.";
+      errBox.classList.remove('hidden');
+    });
+  }
+</script>
+</body>
+</html>
